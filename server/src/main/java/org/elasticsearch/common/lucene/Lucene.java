@@ -66,7 +66,6 @@ import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.lucene.index.SequentialStoredFieldsLeafReader;
 import org.elasticsearch.common.lucene.search.TopDocsAndMaxScore;
-import org.elasticsearch.common.util.iterable.Iterables;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.SuppressForbidden;
 import org.elasticsearch.index.analysis.AnalyzerScope;
@@ -115,12 +114,12 @@ public class Lucene {
      * Returns an iterable that allows to iterate over all files in this segments info
      */
     public static Iterable<String> files(SegmentInfos infos) throws IOException {
-        final List<Collection<String>> list = new ArrayList<>();
-        list.add(Collections.singleton(infos.getSegmentsFileName()));
+        final List<String> list = new ArrayList<>();
+        list.add(infos.getSegmentsFileName());
         for (SegmentCommitInfo info : infos) {
-            list.add(info.files());
+            list.addAll(info.files());
         }
-        return Iterables.flatten(list);
+        return list;
     }
 
     /**
