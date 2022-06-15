@@ -235,6 +235,15 @@ public class DesiredBalanceShardsAllocatorTests extends ESTestCase {
         rerouteService.assertNoPendingReroute();
     }
 
+    /**
+     * This verifies the following sequence of events:
+     *
+     * * Create index-1
+     * * Create index-2
+     * * compute the desired balance
+     * * execute reroute due to the desired balance change
+     * * check both listeners are called
+     */
     public void testCallListenersOnlyAfterProducingFreshInput() {
 
         var secondInputSubmitted = new CountDownLatch(1);
@@ -353,6 +362,19 @@ public class DesiredBalanceShardsAllocatorTests extends ESTestCase {
             clusterService.close();
             terminate(threadPool);
         }
+    }
+
+    /**
+     * This verifies the following sequence of events:
+     *
+     * * Create index-1
+     * * Execute reroute with no cluster changes
+     * * compute the desired balance (before above step is complete)
+     * * execute reroute due to the desired balance change
+     * * check the listener is called after the reroute with uptodate balance
+     */
+    public void test() {
+
     }
 
     public void testFailListenersOnNoLongerMasterException() throws Exception {
