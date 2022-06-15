@@ -21,6 +21,7 @@ import org.elasticsearch.cluster.metadata.Metadata;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodeRole;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
+import org.elasticsearch.cluster.routing.BatchedRerouteService;
 import org.elasticsearch.cluster.routing.IndexRoutingTable;
 import org.elasticsearch.cluster.routing.RerouteService;
 import org.elasticsearch.cluster.routing.RoutingTable;
@@ -38,6 +39,7 @@ import org.elasticsearch.gateway.GatewayAllocator;
 import org.elasticsearch.snapshots.SnapshotShardSizeInfo;
 import org.elasticsearch.test.ClusterServiceUtils;
 import org.elasticsearch.test.ESTestCase;
+import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.threadpool.TestThreadPool;
 
 import java.util.List;
@@ -244,7 +246,7 @@ public class DesiredBalanceShardsAllocatorTests extends ESTestCase {
      * * execute reroute due to the desired balance change
      * * check both listeners are called
      */
-    public void testCallListenersOnlyAfterProducingFreshInput() {
+    public void testCallListenersOnlyAfterProducingFreshInput() throws InterruptedException {
 
         var secondInputSubmitted = new CountDownLatch(1);
         var listenersCalled = new CountDownLatch(2);
@@ -320,10 +322,9 @@ public class DesiredBalanceShardsAllocatorTests extends ESTestCase {
             public ClusterState execute(ClusterState currentState) {
                 currentState = createIndex(currentState, "index-1");
                 currentState = allocationService.reroute(currentState, "test-create-index", ActionListener.wrap(response -> {
-                    logger.info("Completing listener 1 with rerouted indexes: {}", reroutedIndexes);
                     assertThat(reroutedIndexes, hasItem("index-1"));
                     listenersCalled.countDown();
-                }, exception -> { throw new AssertionError("Should not fail in test"); }));
+                }, exception -> fail("Should not fail in test")));
                 return currentState;
             }
 
@@ -338,10 +339,9 @@ public class DesiredBalanceShardsAllocatorTests extends ESTestCase {
             public ClusterState execute(ClusterState currentState) {
                 currentState = createIndex(currentState, "index-2");
                 currentState = allocationService.reroute(currentState, "test-create-index", ActionListener.wrap(response -> {
-                    logger.info("Completing listener 2 with rerouted indexes: {}", reroutedIndexes);
                     assertThat(reroutedIndexes, hasItem("index-2"));
                     listenersCalled.countDown();
-                }, exception -> { throw new AssertionError("Should not fail in test"); }));
+                }, exception -> fail("Should not fail in test")));
                 secondInputSubmitted.countDown();
                 return currentState;
             }
@@ -353,11 +353,7 @@ public class DesiredBalanceShardsAllocatorTests extends ESTestCase {
         });
 
         try {
-            try {
-                assertTrue("Should complete both listeners", listenersCalled.await(10, TimeUnit.SECONDS));
-            } catch (InterruptedException e) {
-                throw new AssertionError("Should complete both listeners");
-            }
+            assertTrue("Should complete both listeners", listenersCalled.await(10, TimeUnit.SECONDS));
         } finally {
             clusterService.close();
             terminate(threadPool);
@@ -371,10 +367,123 @@ public class DesiredBalanceShardsAllocatorTests extends ESTestCase {
      * * Execute reroute with no cluster changes
      * * compute the desired balance (before above step is complete)
      * * execute reroute due to the desired balance change
-     * * check the listener is called after the reroute with uptodate balance
+     * * check the listener is called after the reroute with up-to-date balance
      */
-    public void test() {
+    @TestLogging(
+        value = "org.elasticsearch.cluster.routing.allocation.allocator.DesiredBalanceShardsAllocator:TRACE," +
+            "org.elasticsearch.cluster.routing.allocation.allocator.DesiredBalanceService:TRACE"
+//            "org.elasticsearch.cluster.routing.allocation.allocator.DesiredBalanceReconciler:TRACE"
+        ,
+        reason = "to ensure we log autoscaling capacity response on DEBUG level"
+    )
+    public void test() throws InterruptedException {
 
+        var listenersCalled = new CountDownLatch(2);
+        var balanceChangedRerouteAfterManualReroute = new CountDownLatch(1);
+        var getBalanceBeforeComputingDesiredBalance = new CountDownLatch(2);
+
+        var threadPool = new TestThreadPool(getTestName());
+        var rerouteServiceSupplier = new SetOnce<RerouteService>();
+        var clusterService = ClusterServiceUtils.createClusterService(createInitialClusterState(), threadPool);
+        var allocator = new ShardsAllocator() {
+            @Override
+            public void allocate(RoutingAllocation allocation) {
+                final var dataNodeId = allocation.nodes().getDataNodes().values().iterator().next().getId();
+                final var unassignedIterator = allocation.routingNodes().unassigned().iterator();
+                while (unassignedIterator.hasNext()) {
+                    var indexName = unassignedIterator.next().getIndexName();
+                    unassignedIterator.initialize(dataNodeId, null, 0L, allocation.changes());
+                }
+
+                try {
+                    assertTrue("Should have submitted the second input in time", getBalanceBeforeComputingDesiredBalance.await(10, TimeUnit.SECONDS));
+                } catch (InterruptedException e) {
+                    throw new AssertionError("Should have submitted the second input in time");
+                }
+            }
+
+            @Override
+            public ShardAllocationDecision decideShardAllocation(ShardRouting shard, RoutingAllocation allocation) {
+                throw new AssertionError("only used for allocation explain");
+            }
+        };
+
+        var desiredBalanceShardsAllocator = new DesiredBalanceShardsAllocator(allocator, threadPool, rerouteServiceSupplier::get) {
+            @Override
+            DesiredBalance getCurrentDesiredBalance() {
+                getBalanceBeforeComputingDesiredBalance.countDown();
+                return super.getCurrentDesiredBalance();
+            }
+        };
+        clusterService.addListener(desiredBalanceShardsAllocator);
+
+        var allocationService = new AllocationService(new AllocationDeciders(List.of()), new GatewayAllocator() {
+            @Override
+            public void beforeAllocation(RoutingAllocation allocation) {}
+
+            @Override
+            public void allocateUnassigned(
+                ShardRouting shardRouting,
+                RoutingAllocation allocation,
+                UnassignedAllocationHandler unassignedAllocationHandler
+            ) {
+                unassignedAllocationHandler.initialize(allocation.nodes().getLocalNodeId(), null, 0L, allocation.changes());
+            }
+
+            @Override
+            public void afterPrimariesBeforeReplicas(RoutingAllocation allocation) {}
+        }, desiredBalanceShardsAllocator, () -> ClusterInfo.EMPTY, () -> SnapshotShardSizeInfo.EMPTY);
+        rerouteServiceSupplier.set(new BatchedRerouteService(clusterService, (clusterState, reason, listener) -> {
+            try {
+                assertTrue(balanceChangedRerouteAfterManualReroute.await(10, TimeUnit.SECONDS));
+            } catch (InterruptedException e) {
+                throw new AssertionError();
+            }
+            return allocationService.reroute(clusterState, reason, listener);
+        }));
+
+
+        clusterService.submitUnbatchedStateUpdateTask("test-create-index", new ClusterStateUpdateTask() {
+            @Override
+            public ClusterState execute(ClusterState currentState) {
+                var indexName = "index-1";
+                currentState = createIndex(currentState, indexName);
+                currentState = allocationService.reroute(currentState, "test-create-index", ActionListener.wrap(response -> {
+                    var unassigned = clusterService.state().getRoutingTable().index(indexName).primaryShardsUnassigned();
+                    assertThat("All shards should be initializing by this point", unassigned, equalTo(0));
+                    listenersCalled.countDown();
+                }, exception -> fail("Should not fail in test")));
+                return currentState;
+            }
+
+            @Override
+            public void onFailure(Exception e) {
+                fail("Should not happen in test");
+            }
+        });
+
+        clusterService.submitUnbatchedStateUpdateTask("test-reroute", new ClusterStateUpdateTask() {
+            @Override
+            public ClusterState execute(ClusterState currentState) {
+                balanceChangedRerouteAfterManualReroute.countDown();
+                return allocationService.reroute(currentState, "test-create-index", ActionListener.wrap(response -> {
+                    listenersCalled.countDown();
+                }, exception -> fail("Should not fail in test")));
+            }
+
+            @Override
+            public void onFailure(Exception e) {
+                fail("Should not happen in test");
+            }
+        });
+
+
+        try {
+            assertTrue("Should complete both listeners", listenersCalled.await(10, TimeUnit.SECONDS));
+        } finally {
+            clusterService.close();
+            terminate(threadPool);
+        }
     }
 
     public void testFailListenersOnNoLongerMasterException() throws Exception {
