@@ -20,10 +20,11 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.sameInstance;
-import static org.junit.Assert.assertEquals;
 
 public class ContinuousComputationTests extends ESTestCase {
 
@@ -46,17 +47,17 @@ public class ContinuousComputationTests extends ESTestCase {
     public void testConcurrency() throws Exception {
 
         final var result = new AtomicReference<Integer>();
-        final var computation = new ContinuousComputation<Integer>(threadPool.generic()) {
+        final var computation = new ContinuousComputation<Integer>(threadPool.generic(), new BiConsumer<>() {
 
             public final Semaphore executePermit = new Semaphore(1);
 
             @Override
-            protected void processInput(Integer input) {
+            public void accept(Integer input, Predicate<Integer> isFreshChecker) {
                 assertTrue(executePermit.tryAcquire(1));
                 result.set(input);
                 executePermit.release();
             }
-        };
+        });
 
         final Thread[] threads = new Thread[between(1, 5)];
         final int[] valuePerThread = new int[threads.length];
@@ -104,18 +105,16 @@ public class ContinuousComputationTests extends ESTestCase {
         final var finalInput = new Object();
 
         final var result = new AtomicReference<Object>();
-        final var computation = new ContinuousComputation<Object>(threadPool.generic()) {
-            @Override
-            protected void processInput(Object input) {
-                assertNotEquals(input, skippedInput);
-                await.run();
-                result.set(input);
-                await.run();
-                // becomesStaleInput should have become stale by now, but other inputs should remain fresh
-                assertEquals(isFresh(input), input != becomesStaleInput);
-                await.run();
-            }
-        };
+        final var computation = new ContinuousComputation<Object>(threadPool.generic(), (input, isFreshChecker) -> {
+
+            assertNotEquals(input, skippedInput);
+            await.run();
+            result.set(input);
+            await.run();
+            // becomesStaleInput should have become stale by now, but other inputs should remain fresh
+            assertEquals(isFreshChecker.test(input), input != becomesStaleInput);
+            await.run();
+        });
 
         computation.onNewInput(initialInput);
         await.run();

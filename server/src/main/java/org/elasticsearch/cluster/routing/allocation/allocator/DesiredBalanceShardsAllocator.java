@@ -36,6 +36,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import static java.util.stream.Collectors.toSet;
@@ -49,10 +51,10 @@ public class DesiredBalanceShardsAllocator implements ShardsAllocator, ClusterSt
     private static final Logger logger = LogManager.getLogger(DesiredBalanceShardsAllocator.class);
 
     private final ShardsAllocator delegateAllocator;
+    private final PendingListenersQueue queue;
+    private final NodeAllocationOrdering allocationOrdering;
     private final DesiredBalanceComputer desiredBalanceComputer;
     private final ContinuousComputation<DesiredBalanceInput> desiredBalanceComputation;
-    private final NodeAllocationOrdering allocationOrdering;
-    private final PendingListenersQueue queue;
     private final AtomicLong indexGenerator = new AtomicLong(-1);
     private final ConcurrentLinkedQueue<List<MoveAllocationCommand>> pendingDesiredBalanceMoves = new ConcurrentLinkedQueue<>();
     private volatile DesiredBalance currentDesiredBalance = DesiredBalance.INITIAL;
@@ -75,18 +77,20 @@ public class DesiredBalanceShardsAllocator implements ShardsAllocator, ClusterSt
         Supplier<RerouteService> rerouteServiceSupplier
     ) {
         this.delegateAllocator = delegateAllocator;
+        this.queue = new PendingListenersQueue(threadPool);
+        this.allocationOrdering = new NodeAllocationOrdering();
         this.desiredBalanceComputer = new DesiredBalanceComputer(delegateAllocator);
-        this.desiredBalanceComputation = new ContinuousComputation<>(threadPool.generic()) {
+        this.desiredBalanceComputation = new ContinuousComputation<>(threadPool.generic(), new BiConsumer<>() {
 
             @Override
-            protected void processInput(DesiredBalanceInput desiredBalanceInput) {
+            public void accept(DesiredBalanceInput desiredBalanceInput, Predicate<DesiredBalanceInput> isFreshChecker) {
 
                 logger.trace("Computing balance for [{}]", desiredBalanceInput.index());
 
                 setCurrentDesiredBalance(
-                    desiredBalanceComputer.compute(currentDesiredBalance, desiredBalanceInput, pendingDesiredBalanceMoves, this::isFresh)
+                    desiredBalanceComputer.compute(currentDesiredBalance, desiredBalanceInput, pendingDesiredBalanceMoves, isFreshChecker)
                 );
-                var isFresh = isFresh(desiredBalanceInput);
+                var isFresh = isFreshChecker.test(desiredBalanceInput);
 
                 if (isFresh) {
                     if (DesiredBalance.hasChanges(currentDesiredBalance, appliedDesiredBalance)) {
@@ -106,9 +110,7 @@ public class DesiredBalanceShardsAllocator implements ShardsAllocator, ClusterSt
             public String toString() {
                 return "DesiredBalanceShardsAllocator#updateDesiredBalanceAndReroute";
             }
-        };
-        this.allocationOrdering = new NodeAllocationOrdering();
-        this.queue = new PendingListenersQueue(threadPool);
+        });
     }
 
     @Override

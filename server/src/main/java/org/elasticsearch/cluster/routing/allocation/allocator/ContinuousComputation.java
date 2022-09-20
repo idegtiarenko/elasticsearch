@@ -15,25 +15,29 @@ import org.elasticsearch.common.util.concurrent.AbstractRunnable;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 
 /**
  * Asynchronously runs some computation using at most one thread but expects the input value changes over time as it's running. Newer input
  * values are assumed to be fresher and trigger a recomputation. If a computation never starts before a fresher value arrives then it is
  * skipped.
  */
-public abstract class ContinuousComputation<T> {
+public class ContinuousComputation<T> {
 
     private static final Logger logger = LogManager.getLogger(ContinuousComputation.class);
 
-    private final ExecutorService executorService;
     private final AtomicReference<T> enqueuedInput = new AtomicReference<>();
     private final Processor processor = new Processor();
+    private final ExecutorService executorService;
+    private final BiConsumer<T, Predicate<T>> action;
 
     /**
      * @param executorService the background executor service to use to run the computations. No more than one task is executed at once.
      */
-    public ContinuousComputation(ExecutorService executorService) {
+    public ContinuousComputation(ExecutorService executorService, BiConsumer<T, Predicate<T>> action) {
         this.executorService = executorService;
+        this.action = action;
     }
 
     /**
@@ -61,13 +65,6 @@ public abstract class ContinuousComputation<T> {
         return enqueuedInput.get() == input;
     }
 
-    /**
-     * Process the given input.
-     *
-     * @param input the value that was last received by {@link #onNewInput} before invocation.
-     */
-    protected abstract void processInput(T input);
-
     private class Processor extends AbstractRunnable {
 
         @Override
@@ -86,7 +83,7 @@ public abstract class ContinuousComputation<T> {
             final T input = enqueuedInput.get();
             assert input != null;
 
-            processInput(input);
+            action.accept(input, ContinuousComputation.this::isFresh);
 
             if (enqueuedInput.compareAndSet(input, null) == false) {
                 executorService.execute(this);
@@ -95,7 +92,7 @@ public abstract class ContinuousComputation<T> {
 
         @Override
         public String toString() {
-            return "ContinuousComputation$Processor[" + ContinuousComputation.this + "]";
+            return "ContinuousComputation$Processor[" + ContinuousComputation.this.action.toString() + "]";
         }
     }
 }
