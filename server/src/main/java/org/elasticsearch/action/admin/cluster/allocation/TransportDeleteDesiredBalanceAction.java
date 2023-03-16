@@ -33,9 +33,6 @@ import org.elasticsearch.transport.TransportService;
 
 public class TransportDeleteDesiredBalanceAction extends TransportMasterNodeAction<DesiredBalanceRequest, ActionResponse.Empty> {
 
-    private final AllocationService allocationService;
-    @Nullable
-    private final DesiredBalanceShardsAllocator desiredBalanceShardsAllocator;
     private final MasterServiceTaskQueue<ResetDesiredBalanceTask> resetDesiredBalanceTaskQueue;
 
     @Inject
@@ -59,13 +56,13 @@ public class TransportDeleteDesiredBalanceAction extends TransportMasterNodeActi
             in -> ActionResponse.Empty.INSTANCE,
             ThreadPool.Names.MANAGEMENT
         );
-        this.allocationService = allocationService;
-        this.desiredBalanceShardsAllocator = shardsAllocator instanceof DesiredBalanceShardsAllocator allocator ? allocator : null;
-        this.resetDesiredBalanceTaskQueue = clusterService.createTaskQueue(
-            "reset-desired-balance",
-            Priority.NORMAL,
-            new ResetDesiredBalanceClusterExecutor()
-        );
+        this.resetDesiredBalanceTaskQueue = shardsAllocator instanceof DesiredBalanceShardsAllocator
+            ? clusterService.createTaskQueue(
+                "reset-desired-balance",
+                Priority.NORMAL,
+                new ResetDesiredBalanceClusterExecutor(allocationService, shardsAllocator)
+            )
+            : null;
     }
 
     public record ResetDesiredBalanceTask(ActionListener<ActionResponse.Empty> listener) implements ClusterStateTaskListener {
@@ -76,10 +73,20 @@ public class TransportDeleteDesiredBalanceAction extends TransportMasterNodeActi
         }
     }
 
-    public final class ResetDesiredBalanceClusterExecutor implements ClusterStateTaskExecutor<ResetDesiredBalanceTask> {
+    public static final class ResetDesiredBalanceClusterExecutor implements ClusterStateTaskExecutor<ResetDesiredBalanceTask> {
+
+        private final AllocationService allocationService;
+        @Nullable
+        private final DesiredBalanceShardsAllocator desiredBalanceShardsAllocator;
+
+        public ResetDesiredBalanceClusterExecutor(AllocationService allocationService, ShardsAllocator shardsAllocator) {
+            this.allocationService = allocationService;
+            this.desiredBalanceShardsAllocator = shardsAllocator instanceof DesiredBalanceShardsAllocator allocator ? allocator : null;
+        }
 
         @Override
         public ClusterState execute(BatchExecutionContext<ResetDesiredBalanceTask> batchExecutionContext) {
+            assert desiredBalanceShardsAllocator != null : "Should be executed only with DesiredBalanceShardsAllocator";
             var state = batchExecutionContext.initialState();
             desiredBalanceShardsAllocator.resetDesiredBalance();
             state = allocationService.reroute(state, "reset-desired-balance", ActionListener.noop());
@@ -97,7 +104,7 @@ public class TransportDeleteDesiredBalanceAction extends TransportMasterNodeActi
         ClusterState state,
         ActionListener<ActionResponse.Empty> listener
     ) throws Exception {
-        if (desiredBalanceShardsAllocator == null) {
+        if (resetDesiredBalanceTaskQueue == null) {
             listener.onFailure(new ResourceNotFoundException("Desired balance allocator is not in use, no desired balance found"));
             return;
         }
