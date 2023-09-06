@@ -13,6 +13,7 @@ import org.elasticsearch.cluster.node.DiscoveryNodeRole;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.node.VersionInformation;
 import org.elasticsearch.common.transport.TransportAddress;
+import org.elasticsearch.common.util.set.Sets;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -23,6 +24,7 @@ import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Threads;
 import org.openjdk.jmh.annotations.Warmup;
 
 import java.util.HashSet;
@@ -34,15 +36,16 @@ import java.util.function.Supplier;
 
 import static java.util.stream.Collectors.toSet;
 
-@Fork(3)
-@Warmup(iterations = 3)
-@Measurement(iterations = 5)
+@Fork(1)
+@Threads(4)
+@Warmup(iterations = 1)
+@Measurement(iterations = 3)
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
 public class StreamBenchmarks {
 
-    @Param({ "1", "3", "25" })
+    @Param({ "1", "3", "10", "25" })
     public int nodes;
     public DiscoveryNodes discoveryNodes;
 
@@ -74,13 +77,22 @@ public class StreamBenchmarks {
     }
 
     @Benchmark
+    public Set<String> nodeIdsFromIteratorWithKnownSize() {
+        var nodeIds = Sets.<String>newHashSetWithExpectedSize(discoveryNodes.size());
+        for (DiscoveryNode discoveryNode : discoveryNodes) {
+            nodeIds.add(discoveryNode.getId());
+        }
+        return nodeIds;
+    }
+
+    @Benchmark
     public Set<String> nodeIdsFromStream() {
         return discoveryNodes.stream().map(DiscoveryNode::getId).collect(toSet());
     }
 
     @Benchmark
     public Set<String> nodeIdsFromStaticHelper() {
-        return collect(discoveryNodes, DiscoveryNode::getId, HashSet::new);
+        return collect(discoveryNodes, DiscoveryNode::getId, () -> Sets.newHashSetWithExpectedSize(discoveryNodes.size()));
     }
 
     private static <V, T, C extends Set<T>> Set<T> collect(Iterable<V> iterable, Function<V, T> mapper, Supplier<C> collection) {
