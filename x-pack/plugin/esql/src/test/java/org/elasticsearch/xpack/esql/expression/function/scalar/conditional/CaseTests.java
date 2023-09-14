@@ -14,7 +14,9 @@ import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.compute.data.Block;
 import org.elasticsearch.compute.data.IntBlock;
 import org.elasticsearch.compute.data.Page;
+import org.elasticsearch.compute.operator.DriverContext;
 import org.elasticsearch.xpack.esql.expression.function.AbstractFunctionTestCase;
+import org.elasticsearch.xpack.esql.expression.function.TestCaseSupplier;
 import org.elasticsearch.xpack.esql.type.EsqlDataTypes;
 import org.elasticsearch.xpack.ql.expression.Expression;
 import org.elasticsearch.xpack.ql.expression.Expression.TypeResolution;
@@ -33,7 +35,7 @@ import static org.hamcrest.Matchers.equalTo;
 
 public class CaseTests extends AbstractFunctionTestCase {
 
-    public CaseTests(@Name("TestCase") Supplier<TestCase> testCaseSupplier) {
+    public CaseTests(@Name("TestCase") Supplier<TestCaseSupplier.TestCase> testCaseSupplier) {
         this.testCase = testCaseSupplier.get();
     }
 
@@ -43,12 +45,12 @@ public class CaseTests extends AbstractFunctionTestCase {
     @ParametersFactory
     public static Iterable<Object[]> parameters() {
         return parameterSuppliersFromTypedData(List.of(new TestCaseSupplier("basics", () -> {
-            List<TypedData> typedData = List.of(
-                new TypedData(true, DataTypes.BOOLEAN, "cond"),
-                new TypedData(new BytesRef("a"), DataTypes.KEYWORD, "a"),
-                new TypedData(new BytesRef("b"), DataTypes.KEYWORD, "b")
+            List<TestCaseSupplier.TypedData> typedData = List.of(
+                new TestCaseSupplier.TypedData(true, DataTypes.BOOLEAN, "cond"),
+                new TestCaseSupplier.TypedData(new BytesRef("a"), DataTypes.KEYWORD, "a"),
+                new TestCaseSupplier.TypedData(new BytesRef("b"), DataTypes.KEYWORD, "b")
             );
-            return new TestCase(
+            return new TestCaseSupplier.TestCase(
                 typedData,
                 "CaseEvaluator[resultType=BYTES_REF, conditions=[ConditionEvaluator[condition=Attribute[channel=0], "
                     + "value=Attribute[channel=1]]], elseVal=Attribute[channel=2]]",
@@ -87,7 +89,9 @@ public class CaseTests extends AbstractFunctionTestCase {
     public void testEvalCase() {
         testCase(
             caseExpr -> toJavaObject(
-                caseExpr.toEvaluator(child -> evaluator(child)).get().eval(new Page(IntBlock.newConstantBlockWith(0, 1))),
+                caseExpr.toEvaluator(child -> evaluator(child))
+                    .get(new DriverContext())
+                    .eval(new Page(IntBlock.newConstantBlockWith(0, 1))),
                 0
             )
         );
@@ -147,13 +151,13 @@ public class CaseTests extends AbstractFunctionTestCase {
         assertEquals(1, toJavaObject(caseExpr.toEvaluator(child -> {
             Object value = child.fold();
             if (value != null && value.equals(2)) {
-                return () -> page -> {
+                return dvrCtx -> page -> {
                     fail("Unexpected evaluation of 4th argument");
                     return null;
                 };
             }
             return evaluator(child);
-        }).get().eval(new Page(IntBlock.newConstantBlockWith(0, 1))), 0));
+        }).get(new DriverContext()).eval(new Page(IntBlock.newConstantBlockWith(0, 1))), 0));
     }
 
     private static Case caseExpr(Object... args) {

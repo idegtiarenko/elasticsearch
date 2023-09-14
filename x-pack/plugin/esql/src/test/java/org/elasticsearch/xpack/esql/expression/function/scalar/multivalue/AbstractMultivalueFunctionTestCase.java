@@ -13,7 +13,9 @@ import org.elasticsearch.compute.data.BlockUtils;
 import org.elasticsearch.compute.data.ElementType;
 import org.elasticsearch.compute.data.Page;
 import org.elasticsearch.compute.data.Vector;
+import org.elasticsearch.compute.operator.DriverContext;
 import org.elasticsearch.test.ESTestCase;
+import org.elasticsearch.xpack.esql.expression.function.TestCaseSupplier;
 import org.elasticsearch.xpack.esql.expression.function.scalar.AbstractScalarFunctionTestCase;
 import org.elasticsearch.xpack.esql.planner.LocalExecutionPlanner;
 import org.elasticsearch.xpack.ql.expression.Expression;
@@ -61,8 +63,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
         cases.add(
             new TestCaseSupplier(
                 name + "(false)",
-                () -> new TestCase(
-                    List.of(new TypedData(List.of(false), DataTypes.BOOLEAN, "field")),
+                () -> new TestCaseSupplier.TestCase(
+                    List.of(new TestCaseSupplier.TypedData(List.of(false), DataTypes.BOOLEAN, "field")),
                     evaluatorName + "[field=Attribute[channel=0]]",
                     expectedDataType,
                     matcher.apply(1, Stream.of(false))
@@ -72,8 +74,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
         cases.add(
             new TestCaseSupplier(
                 name + "(true)",
-                () -> new TestCase(
-                    List.of(new TypedData(List.of(true), DataTypes.BOOLEAN, "field")),
+                () -> new TestCaseSupplier.TestCase(
+                    List.of(new TestCaseSupplier.TypedData(List.of(true), DataTypes.BOOLEAN, "field")),
                     evaluatorName + "[field=Attribute[channel=0]]",
                     expectedDataType,
                     matcher.apply(1, Stream.of(true))
@@ -84,8 +86,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
             cases.add(new TestCaseSupplier(name + "(<booleans>) " + ordering, () -> {
                 List<Boolean> mvData = randomList(2, 100, ESTestCase::randomBoolean);
                 putInOrder(mvData, ordering);
-                return new TestCase(
-                    List.of(new TypedData(mvData, DataTypes.BOOLEAN, "field")),
+                return new TestCaseSupplier.TestCase(
+                    List.of(new TestCaseSupplier.TypedData(mvData, DataTypes.BOOLEAN, "field")),
                     evaluatorName + "[field=Attribute[channel=0]]",
                     expectedDataType,
                     matcher.apply(mvData.size(), mvData.stream())
@@ -118,9 +120,9 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
     ) {
         cases.add(
             new TestCaseSupplier(
-                name + "(\"\")",
-                () -> new TestCase(
-                    List.of(new TypedData(List.of(new BytesRef("")), DataTypes.KEYWORD, "field")),
+                name + "(empty string)",
+                () -> new TestCaseSupplier.TestCase(
+                    List.of(new TestCaseSupplier.TypedData(List.of(new BytesRef("")), DataTypes.KEYWORD, "field")),
                     evaluatorName + "[field=Attribute[channel=0]]",
                     expectedDataType,
                     matcher.apply(1, Stream.of(new BytesRef("")))
@@ -129,8 +131,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
         );
         cases.add(new TestCaseSupplier(name + "(BytesRef)", () -> {
             BytesRef data = new BytesRef(randomAlphaOfLength(10));
-            return new TestCase(
-                List.of(new TypedData(List.of(data), DataTypes.KEYWORD, "field")),
+            return new TestCaseSupplier.TestCase(
+                List.of(new TestCaseSupplier.TypedData(List.of(data), DataTypes.KEYWORD, "field")),
                 evaluatorName + "[field=Attribute[channel=0]]",
                 expectedDataType,
                 matcher.apply(1, Stream.of(data))
@@ -140,8 +142,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
             cases.add(new TestCaseSupplier(name + "(<BytesRefs>) " + ordering, () -> {
                 List<BytesRef> mvData = randomList(1, 100, () -> new BytesRef(randomAlphaOfLength(10)));
                 putInOrder(mvData, ordering);
-                return new TestCase(
-                    List.of(new TypedData(mvData, DataTypes.KEYWORD, "field")),
+                return new TestCaseSupplier.TestCase(
+                    List.of(new TestCaseSupplier.TypedData(mvData, DataTypes.KEYWORD, "field")),
                     evaluatorName + "[field=Attribute[channel=0]]",
                     expectedDataType,
                     matcher.apply(mvData.size(), mvData.stream())
@@ -175,8 +177,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
         cases.add(
             new TestCaseSupplier(
                 name + "(0.0)",
-                () -> new TestCase(
-                    List.of(new TypedData(List.of(0.0), DataTypes.DOUBLE, "field")),
+                () -> new TestCaseSupplier.TestCase(
+                    List.of(new TestCaseSupplier.TypedData(List.of(0.0), DataTypes.DOUBLE, "field")),
                     evaluatorName + "[field=Attribute[channel=0]]",
                     expectedDataType,
                     matcher.apply(1, DoubleStream.of(0.0))
@@ -185,8 +187,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
         );
         cases.add(new TestCaseSupplier(name + "(double)", () -> {
             double mvData = randomDouble();
-            return new TestCase(
-                List.of(new TypedData(List.of(mvData), DataTypes.DOUBLE, "field")),
+            return new TestCaseSupplier.TestCase(
+                List.of(new TestCaseSupplier.TypedData(List.of(mvData), DataTypes.DOUBLE, "field")),
                 evaluatorName + "[field=Attribute[channel=0]]",
                 expectedDataType,
                 matcher.apply(1, DoubleStream.of(mvData))
@@ -196,8 +198,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
             cases.add(new TestCaseSupplier(name + "(<double>) " + ordering, () -> {
                 List<Double> mvData = randomList(1, 100, ESTestCase::randomDouble);
                 putInOrder(mvData, ordering);
-                return new TestCase(
-                    List.of(new TypedData(mvData, DataTypes.DOUBLE, "field")),
+                return new TestCaseSupplier.TestCase(
+                    List.of(new TestCaseSupplier.TypedData(mvData, DataTypes.DOUBLE, "field")),
                     evaluatorName + "[field=Attribute[channel=0]]",
                     expectedDataType,
                     matcher.apply(mvData.size(), mvData.stream().mapToDouble(Double::doubleValue))
@@ -231,8 +233,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
         cases.add(
             new TestCaseSupplier(
                 name + "(0)",
-                () -> new TestCase(
-                    List.of(new TypedData(List.of(0), DataTypes.INTEGER, "field")),
+                () -> new TestCaseSupplier.TestCase(
+                    List.of(new TestCaseSupplier.TypedData(List.of(0), DataTypes.INTEGER, "field")),
                     evaluatorName + "[field=Attribute[channel=0]]",
                     expectedDataType,
                     matcher.apply(1, IntStream.of(0))
@@ -241,8 +243,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
         );
         cases.add(new TestCaseSupplier(name + "(int)", () -> {
             int data = randomInt();
-            return new TestCase(
-                List.of(new TypedData(List.of(data), DataTypes.INTEGER, "field")),
+            return new TestCaseSupplier.TestCase(
+                List.of(new TestCaseSupplier.TypedData(List.of(data), DataTypes.INTEGER, "field")),
                 evaluatorName + "[field=Attribute[channel=0]]",
                 expectedDataType,
                 matcher.apply(1, IntStream.of(data))
@@ -252,8 +254,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
             cases.add(new TestCaseSupplier(name + "(<ints>) " + ordering, () -> {
                 List<Integer> mvData = randomList(1, 100, ESTestCase::randomInt);
                 putInOrder(mvData, ordering);
-                return new TestCase(
-                    List.of(new TypedData(mvData, DataTypes.INTEGER, "field")),
+                return new TestCaseSupplier.TestCase(
+                    List.of(new TestCaseSupplier.TypedData(mvData, DataTypes.INTEGER, "field")),
                     evaluatorName + "[field=Attribute[channel=0]]",
                     expectedDataType,
                     matcher.apply(mvData.size(), mvData.stream().mapToInt(Integer::intValue))
@@ -287,8 +289,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
         cases.add(
             new TestCaseSupplier(
                 name + "(0L)",
-                () -> new TestCase(
-                    List.of(new TypedData(List.of(0L), DataTypes.LONG, "field")),
+                () -> new TestCaseSupplier.TestCase(
+                    List.of(new TestCaseSupplier.TypedData(List.of(0L), DataTypes.LONG, "field")),
                     evaluatorName + "[field=Attribute[channel=0]]",
                     expectedDataType,
                     matcher.apply(1, LongStream.of(0L))
@@ -297,8 +299,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
         );
         cases.add(new TestCaseSupplier(name + "(long)", () -> {
             long data = randomLong();
-            return new TestCase(
-                List.of(new TypedData(List.of(data), DataTypes.LONG, "field")),
+            return new TestCaseSupplier.TestCase(
+                List.of(new TestCaseSupplier.TypedData(List.of(data), DataTypes.LONG, "field")),
                 evaluatorName + "[field=Attribute[channel=0]]",
                 expectedDataType,
                 matcher.apply(1, LongStream.of(data))
@@ -308,8 +310,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
             cases.add(new TestCaseSupplier(name + "(<longs>) " + ordering, () -> {
                 List<Long> mvData = randomList(1, 100, ESTestCase::randomLong);
                 putInOrder(mvData, ordering);
-                return new TestCase(
-                    List.of(new TypedData(mvData, DataTypes.LONG, "field")),
+                return new TestCaseSupplier.TestCase(
+                    List.of(new TestCaseSupplier.TypedData(mvData, DataTypes.LONG, "field")),
                     evaluatorName + "[field=Attribute[channel=0]]",
                     expectedDataType,
                     matcher.apply(mvData.size(), mvData.stream().mapToLong(Long::longValue))
@@ -343,8 +345,14 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
         cases.add(
             new TestCaseSupplier(
                 name + "(0UL)",
-                () -> new TestCase(
-                    List.of(new TypedData(List.of(NumericUtils.asLongUnsigned(BigInteger.ZERO)), DataTypes.UNSIGNED_LONG, "field")),
+                () -> new TestCaseSupplier.TestCase(
+                    List.of(
+                        new TestCaseSupplier.TypedData(
+                            List.of(NumericUtils.asLongUnsigned(BigInteger.ZERO)),
+                            DataTypes.UNSIGNED_LONG,
+                            "field"
+                        )
+                    ),
                     evaluatorName + "[field=Attribute[channel=0]]",
                     expectedDataType,
                     matcher.apply(1, Stream.of(BigInteger.ZERO))
@@ -353,8 +361,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
         );
         cases.add(new TestCaseSupplier(name + "(unsigned long)", () -> {
             long data = randomLong();
-            return new TestCase(
-                List.of(new TypedData(List.of(data), DataTypes.UNSIGNED_LONG, "field")),
+            return new TestCaseSupplier.TestCase(
+                List.of(new TestCaseSupplier.TypedData(List.of(data), DataTypes.UNSIGNED_LONG, "field")),
                 evaluatorName + "[field=Attribute[channel=0]]",
                 expectedDataType,
                 matcher.apply(1, Stream.of(NumericUtils.unsignedLongAsBigInteger(data)))
@@ -364,8 +372,8 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
             cases.add(new TestCaseSupplier(name + "(<unsigned longs>) " + ordering, () -> {
                 List<Long> mvData = randomList(1, 100, ESTestCase::randomLong);
                 putInOrder(mvData, ordering);
-                return new TestCase(
-                    List.of(new TypedData(mvData, DataTypes.UNSIGNED_LONG, "field")),
+                return new TestCaseSupplier.TestCase(
+                    List.of(new TestCaseSupplier.TypedData(mvData, DataTypes.UNSIGNED_LONG, "field")),
                     evaluatorName + "[field=Attribute[channel=0]]",
                     expectedDataType,
                     matcher.apply(mvData.size(), mvData.stream().map(NumericUtils::unsignedLongAsBigInteger))
@@ -423,7 +431,7 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
 
     private void testBlock(boolean insertNulls) {
         int positions = between(1, 1024);
-        TypedData data = testCase.getData().get(0);
+        TestCaseSupplier.TypedData data = testCase.getData().get(0);
         Block oneRowBlock = BlockUtils.fromListRow(testCase.getDataValues())[0];
         ElementType elementType = LocalExecutionPlanner.toElementType(data.type());
         Block.Builder builder = elementType.newBlockBuilder(positions);
@@ -437,7 +445,7 @@ public abstract class AbstractMultivalueFunctionTestCase extends AbstractScalarF
             builder.copyFrom(oneRowBlock, 0, 1);
         }
         Block input = builder.build();
-        Block result = evaluator(buildFieldExpression(testCase)).get().eval(new Page(input));
+        Block result = evaluator(buildFieldExpression(testCase)).get(new DriverContext()).eval(new Page(input));
 
         assertThat(result.getPositionCount(), equalTo(result.getPositionCount()));
         for (int p = 0; p < input.getPositionCount(); p++) {

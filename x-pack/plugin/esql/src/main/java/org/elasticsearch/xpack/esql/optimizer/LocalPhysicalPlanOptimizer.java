@@ -62,7 +62,7 @@ import static org.elasticsearch.xpack.ql.expression.predicate.Predicates.splitAn
 import static org.elasticsearch.xpack.ql.optimizer.OptimizerRules.TransformDirection.UP;
 
 public class LocalPhysicalPlanOptimizer extends ParameterizedRuleExecutor<PhysicalPlan, LocalPhysicalOptimizerContext> {
-    private static final QlTranslatorHandler TRANSLATOR_HANDLER = new EsqlTranslatorHandler();
+    public static final QlTranslatorHandler TRANSLATOR_HANDLER = new EsqlTranslatorHandler();
 
     private final PhysicalVerifier verifier = new PhysicalVerifier();
 
@@ -180,7 +180,7 @@ public class LocalPhysicalPlanOptimizer extends ParameterizedRuleExecutor<Physic
         }
     }
 
-    private static class PushFiltersToSource extends OptimizerRule<FilterExec> {
+    public static class PushFiltersToSource extends OptimizerRule<FilterExec> {
         @Override
         protected PhysicalPlan rule(FilterExec filterExec) {
             PhysicalPlan plan = filterExec;
@@ -213,7 +213,7 @@ public class LocalPhysicalPlanOptimizer extends ParameterizedRuleExecutor<Physic
             return plan;
         }
 
-        private static boolean canPushToSource(Expression exp) {
+        public static boolean canPushToSource(Expression exp) {
             if (exp instanceof BinaryComparison bc) {
                 return isAttributePushable(bc.left(), bc) && bc.right().foldable();
             } else if (exp instanceof BinaryLogic bl) {
@@ -286,7 +286,7 @@ public class LocalPhysicalPlanOptimizer extends ParameterizedRuleExecutor<Physic
         private List<EsQueryExec.FieldSort> buildFieldSorts(List<Order> orders) {
             List<EsQueryExec.FieldSort> sorts = new ArrayList<>(orders.size());
             for (Order o : orders) {
-                sorts.add(new EsQueryExec.FieldSort(((FieldAttribute) o.child()), o.direction(), o.nullsPosition()));
+                sorts.add(new EsQueryExec.FieldSort(((FieldAttribute) o.child()).exactAttribute(), o.direction(), o.nullsPosition()));
             }
             return sorts;
         }
@@ -296,6 +296,12 @@ public class LocalPhysicalPlanOptimizer extends ParameterizedRuleExecutor<Physic
         @Override
         public Query wrapFunctionQuery(ScalarFunction sf, Expression field, Supplier<Query> querySupplier) {
             if (field instanceof FieldAttribute fa) {
+                if (fa.getExactInfo().hasExact()) {
+                    var exact = fa.exactAttribute();
+                    if (exact != fa) {
+                        fa = exact;
+                    }
+                }
                 return ExpressionTranslator.wrapIfNested(new SingleValueQuery(querySupplier.get(), fa.name()), field);
             }
             if (field instanceof MetadataAttribute) {
