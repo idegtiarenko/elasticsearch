@@ -38,8 +38,8 @@ import static java.util.stream.Collectors.toSet;
 
 @Fork(1)
 @Threads(4)
-@Warmup(iterations = 1)
-@Measurement(iterations = 3)
+@Warmup(iterations = 3)
+@Measurement(iterations = 5)
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
@@ -55,8 +55,8 @@ public class StreamBenchmarks {
         for (int n = 0; n < nodes; n++) {
             builder.add(
                 new DiscoveryNode(
-                    "node-" + n,
-                    "node-" + n,
+                    "node-id-" + n,
+                    "node-name-" + n,
                     new TransportAddress(TransportAddress.META_ADDRESS, 10_000 + n),
                     Map.of(),
                     Set.of(DiscoveryNodeRole.DATA_ROLE),
@@ -68,31 +68,55 @@ public class StreamBenchmarks {
     }
 
     @Benchmark
-    public Set<String> nodeIdsFromIterator() {
+    public Result nodeIdsFromIterator() {
         var nodeIds = new HashSet<String>();
         for (DiscoveryNode discoveryNode : discoveryNodes) {
             nodeIds.add(discoveryNode.getId());
         }
-        return nodeIds;
+        var nodeNames = new HashSet<String>();
+        for (DiscoveryNode discoveryNode : discoveryNodes) {
+            nodeNames.add(discoveryNode.getName());
+        }
+        var nodeEphemeralIds = new HashSet<String>();
+        for (DiscoveryNode discoveryNode : discoveryNodes) {
+            nodeEphemeralIds.add(discoveryNode.getEphemeralId());
+        }
+        return new Result(nodeIds, nodeNames, nodeEphemeralIds);
     }
 
     @Benchmark
-    public Set<String> nodeIdsFromIteratorWithKnownSize() {
+    public Result nodeIdsFromIteratorWithKnownSize() {
         var nodeIds = Sets.<String>newHashSetWithExpectedSize(discoveryNodes.size());
         for (DiscoveryNode discoveryNode : discoveryNodes) {
             nodeIds.add(discoveryNode.getId());
         }
-        return nodeIds;
+        var nodeNames = Sets.<String>newHashSetWithExpectedSize(discoveryNodes.size());
+        for (DiscoveryNode discoveryNode : discoveryNodes) {
+            nodeNames.add(discoveryNode.getName());
+        }
+        var nodeEphemeralIds = Sets.<String>newHashSetWithExpectedSize(discoveryNodes.size());
+        for (DiscoveryNode discoveryNode : discoveryNodes) {
+            nodeEphemeralIds.add(discoveryNode.getEphemeralId());
+        }
+        return new Result(nodeIds, nodeNames, nodeEphemeralIds);
     }
 
     @Benchmark
-    public Set<String> nodeIdsFromStream() {
-        return discoveryNodes.stream().map(DiscoveryNode::getId).collect(toSet());
+    public Result nodeIdsFromStream() {
+        return new Result(
+            discoveryNodes.stream().map(DiscoveryNode::getId).collect(toSet()),
+            discoveryNodes.stream().map(DiscoveryNode::getName).collect(toSet()),
+            discoveryNodes.stream().map(DiscoveryNode::getEphemeralId).collect(toSet())
+        );
     }
 
     @Benchmark
-    public Set<String> nodeIdsFromStaticHelper() {
-        return collect(discoveryNodes, DiscoveryNode::getId, () -> Sets.newHashSetWithExpectedSize(discoveryNodes.size()));
+    public Result nodeIdsFromStaticHelper() {
+        return new Result(
+            collect(discoveryNodes, DiscoveryNode::getId, () -> Sets.newHashSetWithExpectedSize(discoveryNodes.size())),
+            collect(discoveryNodes, DiscoveryNode::getName, () -> Sets.newHashSetWithExpectedSize(discoveryNodes.size())),
+            collect(discoveryNodes, DiscoveryNode::getEphemeralId, () -> Sets.newHashSetWithExpectedSize(discoveryNodes.size()))
+        );
     }
 
     private static <V, T, C extends Set<T>> Set<T> collect(Iterable<V> iterable, Function<V, T> mapper, Supplier<C> collection) {
@@ -102,4 +126,6 @@ public class StreamBenchmarks {
         }
         return values;
     }
+
+    private record Result(Set<String> nodeIds, Set<String> nodeNames, Set<String> nodeEphemeralIds) {}
 }
