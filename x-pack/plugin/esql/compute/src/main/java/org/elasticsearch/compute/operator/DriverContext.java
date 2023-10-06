@@ -7,7 +7,9 @@
 
 package org.elasticsearch.compute.operator;
 
+import org.elasticsearch.common.breaker.CircuitBreaker;
 import org.elasticsearch.common.util.BigArrays;
+import org.elasticsearch.compute.data.BlockFactory;
 import org.elasticsearch.core.Releasable;
 
 import java.util.Collections;
@@ -35,9 +37,6 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class DriverContext {
 
-    /** A default driver context. The returned bigArrays is non recycling. */
-    public static DriverContext DEFAULT = new DriverContext(BigArrays.NON_RECYCLING_INSTANCE);
-
     // Working set. Only the thread executing the driver will update this set.
     Set<Releasable> workingSet = Collections.newSetFromMap(new IdentityHashMap<>());
 
@@ -45,18 +44,28 @@ public class DriverContext {
 
     private final BigArrays bigArrays;
 
-    // For testing
-    public DriverContext() {
-        this(BigArrays.NON_RECYCLING_INSTANCE);
-    }
+    private final BlockFactory blockFactory;
 
-    public DriverContext(BigArrays bigArrays) {
+    public DriverContext(BigArrays bigArrays, BlockFactory blockFactory) {
         Objects.requireNonNull(bigArrays);
+        Objects.requireNonNull(blockFactory);
         this.bigArrays = bigArrays;
+        this.blockFactory = blockFactory;
     }
 
     public BigArrays bigArrays() {
         return bigArrays;
+    }
+
+    /**
+     * The {@link CircuitBreaker} to use to track memory.
+     */
+    public CircuitBreaker breaker() {
+        return blockFactory.breaker();
+    }
+
+    public BlockFactory blockFactory() {
+        return blockFactory;
     }
 
     /** A snapshot of the driver context. */

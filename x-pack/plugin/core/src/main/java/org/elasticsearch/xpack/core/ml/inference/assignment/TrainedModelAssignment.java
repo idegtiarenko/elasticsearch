@@ -137,6 +137,7 @@ public class TrainedModelAssignment implements SimpleDiffable<TrainedModelAssign
             : Math.max(maxAssignedAllocations, totalCurrentAllocations());
     }
 
+    @SuppressWarnings("this-escape")
     public TrainedModelAssignment(StreamInput in) throws IOException {
         this.taskParams = new StartTrainedModelDeploymentAction.TaskParams(in);
         this.nodeRoutingTable = in.readOrderedMap(StreamInput::readString, RoutingInfo::new);
@@ -212,7 +213,9 @@ public class TrainedModelAssignment implements SimpleDiffable<TrainedModelAssign
 
             var nodeCounts = new ArrayList<Tuple<String, Integer>>();
             for (int i = 0; i < counts.length; i++) {
-                nodeCounts.add(new Tuple<>(nodeIds.get(i), counts[i]));
+                if (counts[i] > 0) {
+                    nodeCounts.add(new Tuple<>(nodeIds.get(i), counts[i]));
+                }
             }
             return nodeCounts;
         }
@@ -231,7 +234,10 @@ public class TrainedModelAssignment implements SimpleDiffable<TrainedModelAssign
 
         var nodeCounts = new ArrayList<Tuple<String, Integer>>();
         for (int i = 0; i < counts.length; i++) {
-            nodeCounts.add(new Tuple<>(nodeIds.get(i), counts[i]));
+            // filter out zero counts
+            if (counts[i] > 0) {
+                nodeCounts.add(new Tuple<>(nodeIds.get(i), counts[i]));
+            }
         }
         return nodeCounts;
     }
