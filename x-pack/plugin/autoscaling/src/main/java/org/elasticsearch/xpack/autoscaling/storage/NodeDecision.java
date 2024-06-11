@@ -63,7 +63,7 @@ class NodeDecision implements ToXContentObject, Writeable {
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         builder.startObject();
-        discoveryNodeToXContent(node, false, builder);
+        discoveryNodeToXContent(node, null, false, builder);
         {
             builder.startArray("deciders");
             decision.toXContent(builder, params);

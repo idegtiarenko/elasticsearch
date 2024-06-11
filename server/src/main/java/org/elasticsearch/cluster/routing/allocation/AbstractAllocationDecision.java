@@ -27,6 +27,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+
+import static org.elasticsearch.TransportVersions.DESIRED_NODE;
 
 /**
  * An abstract class for representing various types of allocation decisions.
@@ -36,15 +39,23 @@ public abstract class AbstractAllocationDecision implements ChunkedToXContentObj
     @Nullable
     protected final DiscoveryNode targetNode;
     @Nullable
+    protected final Boolean targetNodeIsDesired;
+    @Nullable
     protected final List<NodeAllocationResult> nodeDecisions;
 
-    protected AbstractAllocationDecision(@Nullable DiscoveryNode targetNode, @Nullable List<NodeAllocationResult> nodeDecisions) {
+    protected AbstractAllocationDecision(
+        @Nullable DiscoveryNode targetNode,
+        @Nullable Boolean targetNodeIsDesired,
+        @Nullable List<NodeAllocationResult> nodeDecisions
+    ) {
         this.targetNode = targetNode;
+        this.targetNodeIsDesired = targetNodeIsDesired;
         this.nodeDecisions = nodeDecisions != null ? sortNodeDecisions(nodeDecisions) : null;
     }
 
     protected AbstractAllocationDecision(StreamInput in) throws IOException {
         targetNode = in.readOptionalWriteable(DiscoveryNode::new);
+        targetNodeIsDesired = in.getTransportVersion().onOrAfter(DESIRED_NODE) ? in.readOptionalBoolean() : null;
         nodeDecisions = in.readBoolean() ? in.readCollectionAsImmutableList(NodeAllocationResult::new) : null;
     }
 
@@ -86,6 +97,9 @@ public abstract class AbstractAllocationDecision implements ChunkedToXContentObj
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         out.writeOptionalWriteable(targetNode);
+        if (out.getTransportVersion().onOrAfter(DESIRED_NODE)) {
+            out.writeOptionalBoolean(targetNodeIsDesired);
+        }
         if (nodeDecisions != null) {
             out.writeBoolean(true);
             out.writeCollection(nodeDecisions);
@@ -103,11 +117,18 @@ public abstract class AbstractAllocationDecision implements ChunkedToXContentObj
     /**
      * Generates X-Content for a {@link DiscoveryNode} that leaves off some of the non-critical fields.
      */
-    public static XContentBuilder discoveryNodeToXContent(DiscoveryNode node, boolean outerObjectWritten, XContentBuilder builder)
-        throws IOException {
+    public static XContentBuilder discoveryNodeToXContent(
+        DiscoveryNode node,
+        Boolean desired,
+        boolean outerObjectWritten,
+        XContentBuilder builder
+    ) throws IOException {
 
         builder.field(outerObjectWritten ? "id" : "node_id", node.getId());
         builder.field(outerObjectWritten ? "name" : "node_name", node.getName());
+        if (desired != null) {
+            builder.field("desired", desired);
+        }
         builder.field("transport_address", node.getAddress().toString());
         if (node.getAttributes().isEmpty() == false) {
             builder.startObject(outerObjectWritten ? "attributes" : "node_attributes");
@@ -171,12 +192,26 @@ public abstract class AbstractAllocationDecision implements ChunkedToXContentObj
             return false;
         }
         AbstractAllocationDecision that = (AbstractAllocationDecision) other;
-        return Objects.equals(targetNode, that.targetNode) && Objects.equals(nodeDecisions, that.nodeDecisions);
+        return Objects.equals(targetNode, that.targetNode)
+            && Objects.equals(targetNodeIsDesired, that.targetNodeIsDesired)
+            && Objects.equals(nodeDecisions, that.nodeDecisions);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(targetNode, nodeDecisions);
+        return Objects.hash(targetNode, targetNodeIsDesired, nodeDecisions);
     }
 
+    protected static List<NodeAllocationResult> decisionsWithDesiredNodes(
+        List<NodeAllocationResult> decisions,
+        Set<String> desiredNodeIds
+    ) {
+        return decisions != null
+            ? decisions.stream().map(decision -> decision.withDesired(nodeIsDesired(decision.getNode(), desiredNodeIds))).toList()
+            : null;
+    }
+
+    protected static Boolean nodeIsDesired(@Nullable DiscoveryNode node, Set<String> desiredNodeIds) {
+        return node == null ? null : desiredNodeIds.contains(node.getId());
+    }
 }

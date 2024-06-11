@@ -18,6 +18,7 @@ import org.elasticsearch.xcontent.ToXContent;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.Set;
 
 /**
  * Represents the decision taken for the allocation of a single shard.  If
@@ -92,4 +93,10 @@ public final class ShardAllocationDecision implements ChunkedToXContentObject, W
         );
     }
 
+    public ShardAllocationDecision withDesired(Set<String> desiredNodeIds) {
+        return new ShardAllocationDecision(
+            allocateDecision.withDesiredNodes(desiredNodeIds),
+            moveDecision.withDesiredNodes(desiredNodeIds)
+        );
+    }
 }

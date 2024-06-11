@@ -178,7 +178,7 @@ public final class ClusterAllocationExplanation implements ChunkedToXContentObje
 
             if (this.currentNode != null) {
                 builder.startObject("current_node");
-                discoveryNodeToXContent(this.currentNode, true, builder);
+                discoveryNodeToXContent(this.currentNode, null, true, builder);
                 if (shardAllocationDecision.getMoveDecision().isDecisionTaken()
                     && shardAllocationDecision.getMoveDecision().getCurrentNodeRanking() > 0) {
                     builder.field("weight_ranking", shardAllocationDecision.getMoveDecision().getCurrentNodeRanking());

@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Represents a decision to move a started shard, either because it is no longer allowed to remain on its current node
@@ -28,27 +29,29 @@ import java.util.Objects;
  */
 public final class MoveDecision extends AbstractAllocationDecision {
     /** a constant representing no decision taken */
-    public static final MoveDecision NOT_TAKEN = new MoveDecision(null, null, AllocationDecision.NO_ATTEMPT, null, null, 0);
+    public static final MoveDecision NOT_TAKEN = new MoveDecision(null, null, null, AllocationDecision.NO_ATTEMPT, null, null, 0);
     /** cached decisions so we don't have to recreate objects for common decisions when not in explain mode. */
     private static final MoveDecision CACHED_STAY_DECISION = new MoveDecision(
-        Decision.YES,
+        null,
+        null,
         null,
         AllocationDecision.NO_ATTEMPT,
-        null,
+        Decision.YES,
         null,
         0
     );
     private static final MoveDecision CACHED_CANNOT_MOVE_DECISION = new MoveDecision(
-        Decision.NO,
+        null,
+        null,
         null,
         AllocationDecision.NO,
-        null,
+        Decision.NO,
         null,
         0
     );
 
     @Nullable
-    AllocationDecision allocationDecision;
+    private final AllocationDecision allocationDecision;
     @Nullable
     private final Decision canRemainDecision;
     @Nullable
@@ -56,14 +59,15 @@ public final class MoveDecision extends AbstractAllocationDecision {
     private final int currentNodeRanking;
 
     private MoveDecision(
+        DiscoveryNode assignedNode,
+        Boolean desired,
+        List<NodeAllocationResult> nodeDecisions,
+        AllocationDecision allocationDecision,
         Decision canRemainDecision,
         Decision clusterRebalanceDecision,
-        AllocationDecision allocationDecision,
-        DiscoveryNode assignedNode,
-        List<NodeAllocationResult> nodeDecisions,
         int currentNodeRanking
     ) {
-        super(assignedNode, nodeDecisions);
+        super(assignedNode, desired, nodeDecisions);
         this.allocationDecision = allocationDecision;
         this.canRemainDecision = canRemainDecision;
         this.clusterRebalanceDecision = clusterRebalanceDecision;
@@ -87,6 +91,18 @@ public final class MoveDecision extends AbstractAllocationDecision {
         out.writeVInt(currentNodeRanking);
     }
 
+    public MoveDecision withDesiredNodes(Set<String> desiredNodeIds) {
+        return new MoveDecision(
+            targetNode,
+            nodeIsDesired(targetNode, desiredNodeIds),
+            decisionsWithDesiredNodes(nodeDecisions, desiredNodeIds),
+            allocationDecision,
+            canRemainDecision,
+            clusterRebalanceDecision,
+            currentNodeRanking
+        );
+    }
+
     /**
      * Creates a move decision for the shard being able to remain on its current node, so the shard won't
      * be forced to move to another node.
@@ -96,7 +112,7 @@ public final class MoveDecision extends AbstractAllocationDecision {
             return CACHED_STAY_DECISION;
         }
         assert canRemainDecision.type() != Type.NO;
-        return new MoveDecision(canRemainDecision, null, AllocationDecision.NO_ATTEMPT, null, null, 0);
+        return new MoveDecision(null, null, null, AllocationDecision.NO_ATTEMPT, canRemainDecision, null, 0);
     }
 
     /**
@@ -121,7 +137,7 @@ public final class MoveDecision extends AbstractAllocationDecision {
             return CACHED_CANNOT_MOVE_DECISION;
         } else {
             assert ((assignedNode == null) == (allocationDecision != AllocationDecision.YES));
-            return new MoveDecision(canRemainDecision, null, allocationDecision, assignedNode, nodeDecisions, 0);
+            return new MoveDecision(assignedNode, null, nodeDecisions, allocationDecision, canRemainDecision, null, 0);
         }
     }
 
@@ -134,7 +150,7 @@ public final class MoveDecision extends AbstractAllocationDecision {
         int currentNodeRanking,
         List<NodeAllocationResult> nodeDecisions
     ) {
-        return new MoveDecision(null, canRebalanceDecision, allocationDecision, null, nodeDecisions, currentNodeRanking);
+        return new MoveDecision(null, null, nodeDecisions, allocationDecision, null, canRebalanceDecision, currentNodeRanking);
     }
 
     /**
@@ -147,7 +163,7 @@ public final class MoveDecision extends AbstractAllocationDecision {
         int currentNodeRanking,
         List<NodeAllocationResult> nodeDecisions
     ) {
-        return new MoveDecision(null, canRebalanceDecision, allocationDecision, assignedNode, nodeDecisions, currentNodeRanking);
+        return new MoveDecision(assignedNode, null, nodeDecisions, allocationDecision, null, canRebalanceDecision, currentNodeRanking);
     }
 
     @Override
@@ -160,11 +176,12 @@ public final class MoveDecision extends AbstractAllocationDecision {
      */
     public MoveDecision withRemainDecision(Decision canRemainDecision) {
         return new MoveDecision(
+            targetNode,
+            null,
+            nodeDecisions,
+            allocationDecision,
             canRemainDecision,
             clusterRebalanceDecision,
-            allocationDecision,
-            targetNode,
-            nodeDecisions,
             currentNodeRanking
         );
     }
@@ -289,7 +306,7 @@ public final class MoveDecision extends AbstractAllocationDecision {
         return Iterators.concat(Iterators.single((builder, p) -> {
             if (targetNode != null) {
                 builder.startObject("target_node");
-                discoveryNodeToXContent(targetNode, true, builder);
+                discoveryNodeToXContent(targetNode, targetNodeIsDesired, true, builder);
                 builder.endObject();
             }
             builder.field("can_remain_on_current_node", canRemain() ? "yes" : "no");
