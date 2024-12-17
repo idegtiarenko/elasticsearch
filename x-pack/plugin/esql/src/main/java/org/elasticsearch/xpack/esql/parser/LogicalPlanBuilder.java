@@ -505,9 +505,9 @@ public class LogicalPlanBuilder extends ExpressionBuilder {
 
     @Override
     public PlanFactory visitLookupCommand(EsqlBaseParser.LookupCommandContext ctx) {
-        if (false == Build.current().isSnapshot()) {
-            throw new ParsingException(source(ctx), "LOOKUP__ is in preview and only available in SNAPSHOT build");
-        }
+//        if (false == Build.current().isSnapshot()) {
+//            throw new ParsingException(source(ctx), "LOOKUP__ is in preview and only available in SNAPSHOT build");
+//        }
         var source = source(ctx);
 
         @SuppressWarnings("unchecked")
@@ -530,9 +530,9 @@ public class LogicalPlanBuilder extends ExpressionBuilder {
 
     public PlanFactory visitJoinCommand(EsqlBaseParser.JoinCommandContext ctx) {
         var source = source(ctx);
-        if (false == Build.current().isSnapshot()) {
-            throw new ParsingException(source, "JOIN is in preview and only available in SNAPSHOT build");
-        }
+//        if (false == Build.current().isSnapshot()) {
+//            throw new ParsingException(source, "JOIN is in preview and only available in SNAPSHOT build");
+//        }
 
         if (ctx.type != null && ctx.type.getType() != EsqlBaseParser.DEV_JOIN_LOOKUP) {
             String joinType = ctx.type == null ? "(INNER)" : ctx.type.getText();
