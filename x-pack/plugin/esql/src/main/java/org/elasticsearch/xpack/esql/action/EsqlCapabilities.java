@@ -162,7 +162,7 @@ public class EsqlCapabilities {
          * - fixed variable shadowing
          * - fixed Join.references(), requiring breaking change to Join serialization
          */
-        LOOKUP_V4(Build.current().isSnapshot()),
+        LOOKUP_V4(true),
 
         /**
          * Support for requesting the "REPEAT" command.
@@ -537,7 +537,7 @@ public class EsqlCapabilities {
          * - Introduce BinaryPlan and co
          * - Refactor INLINESTATS and LOOKUP as a JOIN block
          */
-        JOIN_PLANNING_V1(Build.current().isSnapshot()),
+        JOIN_PLANNING_V1(true),
 
         /**
          * Support implicit casting from string literal to DATE_PERIOD or TIME_DURATION.
@@ -547,7 +547,7 @@ public class EsqlCapabilities {
         /**
          * LOOKUP JOIN
          */
-        JOIN_LOOKUP_V6(Build.current().isSnapshot()),
+        JOIN_LOOKUP_V6(true),
 
         /**
          * Fix for https://github.com/elastic/elasticsearch/issues/117054
