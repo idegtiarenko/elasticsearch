@@ -88,11 +88,11 @@ DEV_INLINESTATS : {this.isDevVersion()}? 'inlinestats'   -> pushMode(EXPRESSION_
 DEV_LOOKUP :      {this.isDevVersion()}? 'lookup_🐔'      -> pushMode(LOOKUP_MODE);
 DEV_METRICS :     {this.isDevVersion()}? 'metrics'       -> pushMode(METRICS_MODE);
 // list of all JOIN commands
-DEV_JOIN :        {this.isDevVersion()}? 'join'          -> pushMode(JOIN_MODE);
-DEV_JOIN_FULL :   {this.isDevVersion()}? 'full'          -> pushMode(JOIN_MODE);
-DEV_JOIN_LEFT :   {this.isDevVersion()}? 'left'          -> pushMode(JOIN_MODE);
-DEV_JOIN_RIGHT :  {this.isDevVersion()}? 'right'         -> pushMode(JOIN_MODE);
-DEV_JOIN_LOOKUP : {this.isDevVersion()}? 'lookup'        -> pushMode(JOIN_MODE);
+DEV_JOIN :        'join'          -> pushMode(JOIN_MODE);
+DEV_JOIN_FULL :   'full'          -> pushMode(JOIN_MODE);
+DEV_JOIN_LEFT :   'left'          -> pushMode(JOIN_MODE);
+DEV_JOIN_RIGHT :  'right'         -> pushMode(JOIN_MODE);
+DEV_JOIN_LOOKUP : 'lookup'        -> pushMode(JOIN_MODE);
 
 
 //

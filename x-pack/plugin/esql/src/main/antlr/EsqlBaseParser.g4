@@ -54,7 +54,7 @@ processingCommand
     // in development
     | {this.isDevVersion()}? inlinestatsCommand
     | {this.isDevVersion()}? lookupCommand
-    | {this.isDevVersion()}? joinCommand
+    | joinCommand
     ;
 
 whereCommand
