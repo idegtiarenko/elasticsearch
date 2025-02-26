@@ -59,7 +59,7 @@ public class EsqlQueryRequest extends org.elasticsearch.xpack.core.esql.action.E
      */
     private final Map<String, Map<String, Column>> tables = new TreeMap<>();
 
-    static EsqlQueryRequest syncEsqlQueryRequest() {
+    public static EsqlQueryRequest syncEsqlQueryRequest() {
         return new EsqlQueryRequest(false);
     }
 
