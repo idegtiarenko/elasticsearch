@@ -103,7 +103,8 @@ public class CompareEsqlAndSearchIT extends ESRestTestCase {
             containsString("Unknown index [index-1,index-2]"),
             () -> runEsqlQuery(client(), "FROM index-1,index-2 | LIMIT 10")
         );
-        // see https://github.com/elastic/elasticsearch/blob/f097818fa5cfde423f6ea4a1baf8090a7bf611ad/x-pack/plugin/esql/src/main/java/org/elasticsearch/xpack/esql/session/IndexResolver.java#L99-L101
+        // see
+        // https://github.com/elastic/elasticsearch/blob/f097818fa5cfde423f6ea4a1baf8090a7bf611ad/x-pack/plugin/esql/src/main/java/org/elasticsearch/xpack/esql/session/IndexResolver.java#L99-L101
         // that prevents empty index resolution
 
         // There is no way to allow no indices in ESQL with a single expression today. Even with allow _partial_results
@@ -122,6 +123,48 @@ public class CompareEsqlAndSearchIT extends ESRestTestCase {
         // Today esql silently ignores empty patterns as long as something is resolved.
         // Instead, we should check each pattern individually.
         // Related to field caps "unresolved" work
+    }
+
+    public void testConcreteIndexAndMissingIndex() throws IOException {
+        setUpIndex(client(), "local", "data-1");
+
+        expectFailure(
+            equalTo(404),
+            equalTo("index_not_found_exception"),
+            equalTo("no such index [data-2]"),
+            () -> runSearchQuery(client(), "data-1,data-2")
+        );
+        expectFailure(
+            equalTo(404),
+            equalTo("index_not_found_exception"),
+            containsString("no such index [data-2]"),
+            () -> runEsqlQuery(client(), "FROM data-1,data-2 | LIMIT 10", r -> {
+                r.addParameter("allow_partial_results", "true");
+            })
+        );
+        expectFailure(
+            equalTo(404),
+            equalTo("index_not_found_exception"),
+            containsString("no such index [data-2]"),
+            () -> runEsqlQuery(client(), "FROM data-1,data-2 | LIMIT 10", r -> {
+                r.addParameter("allow_partial_results", "false");
+            })
+        );
+    }
+
+    public void testConcreteIndexAndMissingIndexNoDocs() throws IOException {
+        setUpIndex(client(), "local", "data-1", false);
+
+        expectFailure(
+            equalTo(404),
+            equalTo("index_not_found_exception"),
+            equalTo("no such index [data-2]"),
+            () -> runSearchQuery(client(), "data-1,data-2")
+        );
+        var esql1 = runEsqlQuery(client(), "FROM data-1,data-2 | LIMIT 10", r -> { r.addParameter("allow_partial_results", "true"); });
+        assertThat(esql1.values(), equalTo(Set.of()));
+        var esql2 = runEsqlQuery(client(), "FROM data-1,data-2 | LIMIT 10", r -> { r.addParameter("allow_partial_results", "false"); });
+        assertThat(esql2.values(), equalTo(Set.of()));
     }
 
     public void testMathcClosedIndex() throws IOException {
@@ -174,9 +217,15 @@ public class CompareEsqlAndSearchIT extends ESRestTestCase {
     }
 
     private void setUpIndex(RestClient client, String name, String index) throws IOException {
+        setUpIndex(client, name, index, true);
+    }
+
+    private void setUpIndex(RestClient client, String name, String index, boolean indexDocs) throws IOException {
         createIndex(client, index, Settings.builder().put("index.number_of_shards", 1).build());
-        indexDocs(client, name, index);
-        refresh(client, index);
+        if (indexDocs) {
+            indexDocs(client, name, index);
+            refresh(client, index);
+        }
     }
 
     private void closeIndex(RestClient client, String index) throws IOException {
