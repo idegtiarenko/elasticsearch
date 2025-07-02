@@ -97,6 +97,15 @@ public class CompareEsqlAndSearchIT extends ESRestTestCase {
             containsString("Unknown index [index-*]"),
             () -> runEsqlQuery(client(), "FROM index-* | LIMIT 10")
         );
+        expectFailure(
+            equalTo(400),
+            equalTo("verification_exception"),
+            containsString("Unknown index [index-1,index-2]"),
+            () -> runEsqlQuery(client(), "FROM index-1,index-2 | LIMIT 10")
+        );
+        // see https://github.com/elastic/elasticsearch/blob/f097818fa5cfde423f6ea4a1baf8090a7bf611ad/x-pack/plugin/esql/src/main/java/org/elasticsearch/xpack/esql/session/IndexResolver.java#L99-L101
+        // that prevents empty index resolution
+
         // There is no way to allow no indices in ESQL with a single expression today. Even with allow _partial_results
         // Related to field caps "unresolved" work
     }
@@ -106,8 +115,10 @@ public class CompareEsqlAndSearchIT extends ESRestTestCase {
 
         var search = runSearchQuery(client(), "data,index-*", r -> { r.addParameter("allow_no_indices", "true"); });
         assertThat(search.values(), equalTo(Set.of("local-data")));
-        var esql = runEsqlQuery(client(), "FROM data,index-* | LIMIT 10");
-        assertThat(esql.values(), equalTo(Set.of("local-data")));
+        var esql1 = runEsqlQuery(client(), "FROM data,index-* | LIMIT 10", r -> { r.addParameter("allow_partial_results", "true"); });
+        assertThat(esql1.values(), equalTo(Set.of("local-data")));
+        var esql2 = runEsqlQuery(client(), "FROM data,index-* | LIMIT 10", r -> { r.addParameter("allow_partial_results", "false"); });
+        assertThat(esql2.values(), equalTo(Set.of("local-data")));
         // Today esql silently ignores empty patterns as long as something is resolved.
         // Instead, we should check each pattern individually.
         // Related to field caps "unresolved" work
