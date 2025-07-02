@@ -58,6 +58,17 @@ public class CompareEsqlAndSearchIT extends ESRestTestCase {
         return buildClient(restClientSettings(), parseClusterHosts(remoteCluster.getHttpAddresses()).toArray(new HttpHost[0]));
     }
 
+    /*
+     * Condition to resolve to at least 1 concrete index: https://github.com/elastic/elasticsearch/blob/f097818fa5cfde423f6ea4a1baf8090a7bf611ad/x-pack/plugin/esql/src/main/java/org/elasticsearch/xpack/esql/session/IndexResolver.java#L99-L101
+     * Runtime failure when querying with unresolvable concrete index:
+     * during can match: https://github.com/elastic/elasticsearch/blob/f4b608614813efa0baceae8de9106a57a3c56dcb/x-pack/plugin/esql/src/main/java/org/elasticsearch/xpack/esql/plugin/DataNodeRequestSender.java#L490-L497
+     * likely due to the index options
+     * https://github.com/elastic/elasticsearch/blob/7b89f4d4a6b12abf0a1571a924a6a6363f3e5139/server/src/main/java/org/elasticsearch/action/support/IndicesOptions.java#L698-L707
+     * BUT it does not fail if the rest of indices are empty
+     *
+     * Runtime failure when querying closed index: https://github.com/elastic/elasticsearch/blob/d3d10c2efbbf2c170d0861e2cdba67ac776ffa70/server/src/main/java/org/elasticsearch/action/fieldcaps/TransportFieldCapabilitiesAction.java#L173
+     */
+
     public void testConcreteIndex() throws IOException {
         setUpIndex(client(), "local", "index-1");
 
@@ -103,10 +114,6 @@ public class CompareEsqlAndSearchIT extends ESRestTestCase {
             containsString("Unknown index [index-1,index-2]"),
             () -> runEsqlQuery(client(), "FROM index-1,index-2 | LIMIT 10")
         );
-        // see
-        // https://github.com/elastic/elasticsearch/blob/f097818fa5cfde423f6ea4a1baf8090a7bf611ad/x-pack/plugin/esql/src/main/java/org/elasticsearch/xpack/esql/session/IndexResolver.java#L99-L101
-        // that prevents empty index resolution
-
         // There is no way to allow no indices in ESQL with a single expression today. Even with allow _partial_results
         // Related to field caps "unresolved" work
     }
