@@ -10,10 +10,12 @@ import org.elasticsearch.Build;
 import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.TransportVersion;
 import org.elasticsearch.action.ActionListener;
+import org.elasticsearch.action.ResolvedIndexExpressions;
 import org.elasticsearch.action.fieldcaps.FieldCapabilitiesIndexResponse;
 import org.elasticsearch.action.fieldcaps.FieldCapabilitiesRequest;
 import org.elasticsearch.action.fieldcaps.FieldCapabilitiesResponse;
 import org.elasticsearch.action.fieldcaps.IndexFieldCapabilities;
+import org.elasticsearch.action.support.GroupedActionListener;
 import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.action.support.IndicesOptions.CrossProjectModeOptions;
 import org.elasticsearch.client.internal.Client;
@@ -31,6 +33,7 @@ import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.RemoteClusterAware;
 import org.elasticsearch.xpack.esql.VerificationException;
 import org.elasticsearch.xpack.esql.action.EsqlResolveFieldsAction;
+import org.elasticsearch.xpack.esql.action.EsqlResolveFieldsResponse;
 import org.elasticsearch.xpack.esql.core.expression.MetadataAttribute;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.type.DateEsField;
@@ -46,6 +49,7 @@ import org.elasticsearch.xpack.esql.type.EsqlDataTypeRegistry;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -53,13 +57,17 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.function.BinaryOperator;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import static java.util.stream.Collectors.toMap;
 import static org.elasticsearch.xpack.esql.core.type.DataType.DATETIME;
 import static org.elasticsearch.xpack.esql.core.type.DataType.KEYWORD;
 import static org.elasticsearch.xpack.esql.core.type.DataType.OBJECT;
 import static org.elasticsearch.xpack.esql.core.type.DataType.TEXT;
 import static org.elasticsearch.xpack.esql.core.type.DataType.UNSUPPORTED;
+import static org.elasticsearch.xpack.esql.core.util.CollectionUtils.combine;
 
 public class IndexResolver {
 
@@ -84,8 +92,12 @@ public class IndexResolver {
      * Those options shift index resolution validation to FieldCaps action itself
      * as well as automatically expand flat expressions to multiple qualified ones.
      */
-    private static final IndicesOptions FLAT_WORLD_OPTIONS = IndicesOptions.builder(DEFAULT_OPTIONS)
+    private static final IndicesOptions FLAT_OPTIONS = IndicesOptions.builder(DEFAULT_OPTIONS)
         .concreteTargetOptions(IndicesOptions.ConcreteTargetOptions.ERROR_WHEN_UNAVAILABLE_TARGETS)
+        .crossProjectModeOptions(new CrossProjectModeOptions(true))
+        .build();
+    private static final IndicesOptions LENIENT_FLAT_OPTIONS = IndicesOptions.builder(DEFAULT_OPTIONS)
+        .concreteTargetOptions(IndicesOptions.ConcreteTargetOptions.ALLOW_UNAVAILABLE_TARGETS)
         .crossProjectModeOptions(new CrossProjectModeOptions(true))
         .build();
 
@@ -171,11 +183,11 @@ public class IndexResolver {
     }
 
     /**
-     * Like {@code IndexResolver#resolveIndicesVersioned}
-     * but for flat world queries.
+     * Like {@code IndexResolver#resolveIndicesVersioned} but for CPS/flat queries.
      */
-    public void resolveMainFlatWorldIndicesVersioned(
+    public void resolveMainFlatIndicesVersioned(
         String indexPattern,
+        String optionalLinkedPattern,
         String projectRouting,
         Set<String> fieldNames,
         QueryBuilder requestFilter,
@@ -191,24 +203,99 @@ public class IndexResolver {
         boolean trackUnmappedFieldIndices,
         ActionListener<Versioned<IndexResolution>> listener
     ) {
-        doResolveIndices(
-            createFieldCapsRequest(FLAT_WORLD_OPTIONS, indexPattern, projectRouting, fieldNames, requestFilter, includeAllDimensions, true),
-            indexPattern,
-            true, /* cps/flat index expression might resolve to empty */
-            minimumVersion,
-            useAggregateMetricDoubleWhenNotSupported,
-            useDenseVectorWhenNotSupported,
-            hasTimeSeriesAggregation,
-            trackUnmappedFieldIndices,
-            (indexPattern1, fieldCapabilitiesResponse) -> Maps.transformValues(
-                EsqlResolvedIndexExpression.from(fieldCapabilitiesResponse),
-                v -> List.copyOf(v.expression())
-            ),
-            listener.delegateResponse((l, e) -> {
+        var mergeResponseListener = new GroupedActionListener<EsqlResolveFieldsResponse>(2, new ActionListener<>() {
+            @Override
+            public void onResponse(Collection<EsqlResolveFieldsResponse> responses) {
+                try {
+                    var response = merge(responses);
+                    var overallMinimumVersion = TransportVersion.min(minimumVersion, response.minTransportVersion());
+                    FieldsInfo info = new FieldsInfo(
+                        response,
+                        overallMinimumVersion,
+                        Build.current().isSnapshot(),
+                        useAggregateMetricDoubleWhenNotSupported,
+                        useDenseVectorWhenNotSupported,
+                        hasTimeSeriesAggregation
+                    );
+                    listener.onResponse(
+                        new Versioned<>(
+                            mergedMappings(
+                                indexPattern,
+                                true,
+                                info,
+                                trackUnmappedFieldIndices,
+                                (ignored, fieldCapabilitiesResponse) -> Maps.transformValues(
+                                    EsqlResolvedIndexExpression.from(fieldCapabilitiesResponse),
+                                    v -> List.copyOf(v.expression())
+                                )
+                            ),
+                            info.minTransportVersion()
+                        )
+                    );
+                } catch (Exception e) {
+                    listener.onFailure(e);
+                }
+            }
+
+            @Override
+            public void onFailure(Exception e) {
                 var infe = (IndexNotFoundException) ExceptionsHelper.unwrap(e, IndexNotFoundException.class);
-                l.onFailure(infe != null ? new VerificationException("Unknown index [" + infe.getIndex().getName() + "]") : e);
-            })
-        );
+                listener.onFailure(infe != null ? new VerificationException("Unknown index [" + infe.getIndex().getName() + "]") : e);
+            }
+        });
+        if (indexPattern.isEmpty()) {
+            mergeResponseListener.onResponse(null);
+        } else {
+            client.execute(
+                EsqlResolveFieldsAction.TYPE,
+                createFieldCapsRequest(FLAT_OPTIONS, indexPattern, projectRouting, fieldNames, requestFilter, includeAllDimensions, true),
+                mergeResponseListener
+            );
+        }
+        if (optionalLinkedPattern.isEmpty()) {
+            mergeResponseListener.onResponse(null);
+        } else {
+            client.execute(
+                EsqlResolveFieldsAction.TYPE,
+                createFieldCapsRequest(
+                    LENIENT_FLAT_OPTIONS,
+                    optionalLinkedPattern,
+                    projectRouting,
+                    fieldNames,
+                    requestFilter,
+                    includeAllDimensions,
+                    true
+                ),
+                mergeResponseListener
+            );
+        }
+    }
+
+    private static FieldCapabilitiesResponse merge(Collection<EsqlResolveFieldsResponse> responses) {
+        return responses.stream()
+            .map(EsqlResolveFieldsResponse::caps)
+            .reduce(
+                (r1, r2) -> FieldCapabilitiesResponse.builder()
+                    .withResolvedLocally(ResolvedIndexExpressions.merge(r1.getResolvedLocally(), r2.getResolvedLocally()))
+                    .withResolvedRemotely(merge(r1.getResolvedRemotely(), r2.getResolvedRemotely(), ResolvedIndexExpressions::merge))
+                    .withFields(
+                        merge(
+                            r1.get(),
+                            r2.get(),
+                            (f1, f2) -> merge(f1, f2, (fc1, fc2) -> /*same field from the same concrete index. Safe to pick any*/ fc1)
+                        )
+                    )
+                    .withIndexResponses(combine(r1.getIndexResponses(), r2.getIndexResponses()))
+                    .withFailures(combine(r1.getFailures(), r2.getFailures()))
+                    // minTransportVersion is always present with CPS
+                    .withMinTransportVersion(TransportVersion.min(r1.minTransportVersion(), r2.minTransportVersion()))
+                    .build()
+            )
+            .get(); // at least one response should be present
+    }
+
+    private static <T> Map<String, T> merge(Map<String, T> m1, Map<String, T> m2, BinaryOperator<T> merger) {
+        return Stream.concat(m1.entrySet().stream(), m2.entrySet().stream()).collect(toMap(Map.Entry::getKey, Map.Entry::getValue, merger));
     }
 
     private void doResolveIndices(

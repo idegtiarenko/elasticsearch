@@ -45,7 +45,6 @@ public class PreAnalyzer {
         if (plan.analyzed()) {
             return PreAnalysis.EMPTY;
         }
-
         return doPreAnalyze(plan);
     }
 
