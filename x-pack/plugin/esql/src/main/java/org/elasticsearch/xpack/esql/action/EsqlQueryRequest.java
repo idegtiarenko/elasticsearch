@@ -10,6 +10,7 @@ package org.elasticsearch.xpack.esql.action;
 import org.elasticsearch.Build;
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.CompositeIndicesRequest;
+import org.elasticsearch.action.IndicesRequest.CrossProjectCandidate;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.UUIDs;
 import org.elasticsearch.common.breaker.NoopCircuitBreaker;
@@ -19,6 +20,7 @@ import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.Releasables;
 import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.index.query.QueryBuilder;
+import org.elasticsearch.search.crossproject.TargetProjects;
 import org.elasticsearch.tasks.CancellableTask;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.tasks.TaskId;
@@ -43,7 +45,10 @@ import java.util.TreeMap;
 
 import static org.elasticsearch.action.ValidateActions.addValidationError;
 
-public class EsqlQueryRequest extends org.elasticsearch.xpack.core.esql.action.EsqlQueryRequest implements CompositeIndicesRequest {
+public class EsqlQueryRequest extends org.elasticsearch.xpack.core.esql.action.EsqlQueryRequest
+    implements
+        CompositeIndicesRequest,
+        CrossProjectCandidate {
 
     public static TimeValue DEFAULT_KEEP_ALIVE = TimeValue.timeValueDays(5);
     public static TimeValue DEFAULT_WAIT_FOR_COMPLETION = TimeValue.timeValueSeconds(1);
@@ -67,6 +72,7 @@ public class EsqlQueryRequest extends org.elasticsearch.xpack.core.esql.action.E
     private boolean acceptedPragmaRisks = false;
     private Boolean allowPartialResults = null;
     private String projectRouting;
+    private TargetProjects resolvedTargetProjects;
     private ApproximationSettings approximation;
 
     /**
@@ -378,8 +384,24 @@ public class EsqlQueryRequest extends org.elasticsearch.xpack.core.esql.action.E
         return this;
     }
 
-    public String projectRouting() {
+    @Override
+    public boolean allowsCrossProject() {
+        return true;
+    }
+
+    @Override
+    public String getProjectRouting() {
         return projectRouting;
+    }
+
+    @Override
+    public void setResolvedTargetProjects(TargetProjects resolvedTargetProjects) {
+        this.resolvedTargetProjects = resolvedTargetProjects;
+    }
+
+    @Override
+    public TargetProjects getResolvedTargetProjects() {
+        return resolvedTargetProjects;
     }
 
     public EsqlQueryRequest approximation(ApproximationSettings approximation) {

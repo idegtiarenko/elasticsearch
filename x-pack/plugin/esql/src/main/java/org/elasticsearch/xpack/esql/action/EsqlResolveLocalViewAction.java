@@ -84,7 +84,6 @@ public class EsqlResolveLocalViewAction extends TransportLocalProjectMetadataAct
             return IndicesOptions.DEFAULT;
         }
 
-        @Override
         public void setTargetProjects(TargetProjects targetProjects) {
             this.targetProjects = targetProjects;
         }

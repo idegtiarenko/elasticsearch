@@ -262,7 +262,7 @@ public class EsqlSession {
         viewResolutionProfile.start();
         viewResolver.replaceViews(
             statement.plan(),
-            projectRouting(request, statement),
+            request.getResolvedTargetProjects(),
             (query, viewName) -> parser.parseView(
                 query,
                 request.params(),
@@ -389,7 +389,7 @@ public class EsqlSession {
     private String projectRouting(EsqlQueryRequest request, EsqlStatement statement) {
         String projectRouting = statement.setting(QuerySettings.PROJECT_ROUTING);
         if (projectRouting == null) {
-            projectRouting = request.projectRouting();
+            projectRouting = request.getProjectRouting();
         }
 
         if (projectRouting != null && crossProjectModeDecider.crossProjectEnabled() == false) {

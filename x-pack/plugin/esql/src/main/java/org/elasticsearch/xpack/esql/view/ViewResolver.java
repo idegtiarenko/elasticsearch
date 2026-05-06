@@ -23,6 +23,7 @@ import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.logging.LogManager;
 import org.elasticsearch.logging.Logger;
 import org.elasticsearch.search.crossproject.CrossProjectModeDecider;
+import org.elasticsearch.search.crossproject.TargetProjects;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.xpack.esql.VerificationException;
 import org.elasticsearch.xpack.esql.action.EsqlResolveLocalViewAction;
@@ -141,26 +142,23 @@ public class ViewResolver {
      */
     public void replaceViews(
         LogicalPlan plan,
-        String projectRouting,
+        TargetProjects resolvedTargetProjects,
         BiFunction<String, String, LogicalPlan> parser,
         ActionListener<ViewResolutionResult> listener
     ) {
         Map<String, String> viewQueries = new HashMap<>();
-        if (viewsFeatureEnabled() == false || getMetadata().views().isEmpty()) {
+        if (viewsFeatureEnabled() == false
+            || getMetadata().views().isEmpty()
+            || (resolvedTargetProjects != null && resolvedTargetProjects.originProject() == null)) {
             listener.onResponse(new ViewResolutionResult(plan, viewQueries));
             return;
         }
-        doResolveOriginViews(projectRouting, listener.delegateFailure((l1, shouldResolveLocalViews) -> {
-            if (shouldResolveLocalViews == false) {
-                l1.onResponse(new ViewResolutionResult(plan, viewQueries));
-            } else {
-                replaceViews(plan, parser, new LinkedHashSet<>(), viewQueries, 0, l1.delegateFailureAndWrap((l2, rewritten) -> {
-                    LogicalPlan postProcessed = rewriteUnionAllsWithNamedSubqueries(rewritten);
-                    postProcessed = compactNestedViewUnionAlls(postProcessed);
-                    postProcessed = postProcessed.transformDown(NamedSubquery.class, UnaryPlan::child);
-                    l2.onResponse(new ViewResolutionResult(postProcessed, viewQueries));
-                }));
-            }
+
+        replaceViews(plan, parser, new LinkedHashSet<>(), viewQueries, 0, listener.delegateFailureAndWrap((l, rewritten) -> {
+            LogicalPlan postProcessed = rewriteUnionAllsWithNamedSubqueries(rewritten);
+            postProcessed = compactNestedViewUnionAlls(postProcessed);
+            postProcessed = postProcessed.transformDown(NamedSubquery.class, UnaryPlan::child);
+            l.onResponse(new ViewResolutionResult(postProcessed, viewQueries));
         }));
     }
 
