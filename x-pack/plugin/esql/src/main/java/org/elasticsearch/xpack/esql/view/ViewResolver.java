@@ -23,6 +23,7 @@ import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.logging.LogManager;
 import org.elasticsearch.logging.Logger;
 import org.elasticsearch.search.crossproject.CrossProjectModeDecider;
+import org.elasticsearch.search.crossproject.ProjectRoutingResolver;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.RemoteClusterAware;
 import org.elasticsearch.xpack.esql.VerificationException;
@@ -306,15 +307,31 @@ public class ViewResolver {
             }
         }
 
+        // Strip the _origin: project-routing prefix so that view names like "_origin:my-view"
+        // are resolved against the local view metadata as "my-view". The _origin: prefix is a CPS
+        // routing hint meaning "origin project" — which is always the local project in this context.
+        // The original patterns (with prefix) are preserved for the no-view fallback path so that
+        // field-caps routing is unaffected.
+        String[] localPatterns = Arrays.stream(patterns).map(ViewResolver::toLocalPattern).toArray(String[]::new);
+        // Track which positions had _origin: stripped so that shadow creation is suppressed for those
+        // patterns: the prefix means "origin only", so we must not fan out to linked projects.
+        boolean[] wasOriginRouted = new boolean[patterns.length];
+        for (int i = 0; i < patterns.length; i++) {
+            wasOriginRouted[i] = patterns[i].equals(localPatterns[i]) == false;
+        }
+
         // ViewShadowRelation siblings are only emitted in CPS mode — they exist solely to drive a
         // per-level lenient field-caps lookup against linked projects (esql-planning #543). In
         // non-CPS mode the shadow has no consumer, so we skip the bookkeeping entirely; the rest of
         // the resolver behaves as if shadows are simply not part of the tree.
         boolean cpsEnabled = crossProjectModeDecider.crossProjectEnabled();
-        String[] urPatterns = unresolvedRelation.indexPattern().indexPattern().split(",");
+        // Use localPatterns for shadow matching so that expr.original() from the view-resolution
+        // response (which also uses stripped names) aligns with the urPatterns comparison in
+        // findMatchingPattern below.
+        String[] urPatterns = localPatterns;
 
         var req = new EsqlResolveViewAction.Request(REST_MASTER_TIMEOUT_DEFAULT);
-        req.indices(patterns);
+        req.indices(localPatterns);
 
         doEsqlResolveViewsRequest(req, listener.delegateFailureAndWrap((l1, response) -> {
             if (response.views().length == 0) {
@@ -334,8 +351,12 @@ public class ViewResolver {
                     if (cpsEnabled) {
                         // find pattern referencing current view
                         var patternPosition = findMatchingPattern(view.name(), urPatterns, response);
-                        // patterns do not need to be shadowed as they are retained in original expressions
-                        if (patternIsWildcard(urPatterns[patternPosition]) == false) {
+                        // patterns do not need to be shadowed as they are retained in original expressions.
+                        // also skip shadow for _origin:-prefixed patterns: the user explicitly restricted
+                        // to origin, so we must not fan out to linked projects for these views.
+                        if (patternPosition >= 0
+                            && wasOriginRouted[patternPosition] == false
+                            && patternIsWildcard(urPatterns[patternPosition]) == false) {
                             viewShadows.putIfAbsent(
                                 view.name(),
                                 new ViewShadowRelation(
@@ -361,7 +382,7 @@ public class ViewResolver {
                 });
             }
             chain.andThenApply(ignored -> {
-                List<ViewPlan> subqueries = buildOrderedSubqueries(unresolvedRelation, response, resolvedViews, patterns);
+                List<ViewPlan> subqueries = buildOrderedSubqueries(unresolvedRelation, response, resolvedViews, localPatterns);
                 if (cpsEnabled) {
                     // Append the per-resolved-view ViewShadowRelations as additional siblings at
                     // this same level. They live under suffixed names so they don't collide with
@@ -762,6 +783,22 @@ public class ViewResolver {
             // maintained with the view name for branch identification.
             return new NamedSubquery(subquery.source(), subquery, view.name());
         }
+    }
+
+    /**
+     * Strips the {@code _origin:} project-routing prefix from an index pattern, returning the bare
+     * local name. For example, {@code _origin:my-view} becomes {@code my-view}. Exclusion markers
+     * ({@code -}) are preserved: {@code -_origin:my-view} becomes {@code -my-view}.
+     * Any other prefix (e.g. a real linked-project alias) is left unchanged.
+     */
+    static String toLocalPattern(String pattern) {
+        boolean exclusion = pattern.startsWith("-");
+        String p = exclusion ? pattern.substring(1) : pattern;
+        String[] parts = RemoteClusterAware.splitIndexName(p);
+        if (ProjectRoutingResolver.ORIGIN.equals(parts[0])) {
+            return (exclusion ? "-" : "") + parts[1];
+        }
+        return pattern;
     }
 
     private static boolean containsExclusion(UnresolvedRelation ur) {
